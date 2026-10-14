@@ -14,6 +14,7 @@ from .accounts import Accounts
 from .publishing import Publishers,Worker
 from .creative import generate,research_music
 from .provider import UploadPost
+from .auth import matches,password_record,valid_invite
 
 STATIC=Path(__file__).parent/'static'
 LOGIN='''<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · NextPlay</title><link rel="stylesheet" href="/platform-static/app.css"><body><main class="login"><div class="brand"><span class="brandmark">▷</span> NextPlay</div><h1>Your creative space.</h1><p>Sign in to your private marketing dashboard.</p><form id="login"><label>Password<input id="password" type="password" required autocomplete="current-password"></label><button class="primary">Sign in →</button><p id="error" role="alert"></p></form></main><script>document.querySelector('form').onsubmit=async e=>{e.preventDefault();let r=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-NextPlay':'marketing'},body:JSON.stringify({password:document.querySelector('#password').value})});if(r.ok)location.href='/';else document.querySelector('#error').textContent='Unable to sign in. Check your password or try again later.'}</script></body></html>'''
@@ -28,9 +29,11 @@ class Platform:
             if not self.workspace.product_json.exists():self.workspace.save_product(self.product)
         self.context=DashboardContext(self.product,self.workspace)
         self.store=Store(self.data/'marketing');self.accounts=Accounts(self.data/'private',origin)
+        saved_key=self.accounts.load().get('_openai',{}).get('key')
+        if saved_key and not os.getenv('OPENAI_API_KEY'):os.environ['OPENAI_API_KEY']=saved_key
         self.bridge=UploadPost(self.accounts)
         self.publishers=Publishers(self.accounts,self.workspace.root);self.publishers.bridge=self.bridge;self.worker=Worker(self.store,self.publishers)
-        self.origin=origin.rstrip('/');self.sessions={};self.login_failures={};self.auth_lock=threading.Lock()
+        self.origin=origin.rstrip('/');self.sessions={};self.login_failures={};self.auth_lock=threading.Lock();self.used_invites=set()
     def media_record(self,path,rights=False,revision=None):
         root=self.workspace.root.resolve();path=Path(path).resolve();path.relative_to(root)
         from ffmpeg_bin import FFMPEG
@@ -57,7 +60,7 @@ class Platform:
         if post_id:return self.store.edit(post_id,expected,{'media':media,'timeline':timeline,'music':None})
         return self.store.create(Path(filename).stem,media=media,timeline=timeline)
     def state(self):
-        return {'posts':self.store.posts(),'jobs':[{'id':j['id'],'post_id':j['post_id'],'channel':j['channel'],'due':j['due'],'status':j['status'],'error':j['payload'].get('error',''),'provider':j['payload'].get('provider',{})} for j in self.store.jobs()], 'brand':self.store.settings(),'accounts':self.connections(), 'publishing_service':{'name':'Upload-Post','configured':self.bridge.configured(),'profile':self.bridge.config()['profile']},'music':self.store.music(),'metrics':self.store.metrics(),'events':self.store.events(),'ai':bool(os.getenv('OPENAI_API_KEY')),'origin':self.origin,'version':'5.0.0','hosting':'local' if urlparse(self.origin).hostname in ('127.0.0.1','localhost') else 'hosted'}
+        return {'posts':self.store.posts(),'jobs':[{'id':j['id'],'post_id':j['post_id'],'channel':j['channel'],'due':j['due'],'status':j['status'],'error':j['payload'].get('error',''),'provider':j['payload'].get('provider',{})} for j in self.store.jobs()], 'brand':self.store.settings(),'accounts':self.connections(), 'publishing_service':{'name':'Upload-Post','configured':self.bridge.configured(),'profile':self.bridge.config()['profile']},'music':self.store.music(),'metrics':self.store.metrics(),'events':self.store.events(),'ai':bool(os.getenv('OPENAI_API_KEY')),'origin':self.origin,'version':'5.0.0','password_set':bool(self.accounts.load().get('_workspace_auth')),'hosting':'local' if urlparse(self.origin).hostname in ('127.0.0.1','localhost') else 'hosted'}
     def connections(self):
         external=self.bridge.status()
         if external is not None:return external
@@ -96,6 +99,18 @@ class Platform:
 
 class Handler(_DashboardHandler):
     platform:Platform
+    def _session(self,status=200,location=None):
+        session=secrets.token_urlsafe(32);self.platform.sessions[session]=time.time()+43200
+        self.send_response(status)
+        self.send_header('Set-Cookie','nextplay_session='+session+'; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200'+('; Secure' if self.platform.origin.startswith('https') else ''))
+        self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer')
+        if location:self.send_header('Location',location)
+        self.send_header('Content-Length','2' if status==200 else '0');self.end_headers()
+        if status==200:self.wfile.write(b'{}')
+    def log_message(self,format,*args):
+        # First-login tokens must never appear in application logs.
+        if urlparse(self.path).path=='/auth/link':return
+        super().log_message(format,*args)
     def _authenticated(self):
         if not os.getenv('NEXTPLAY_PASSWORD'):return True
         import http.cookies
@@ -104,12 +119,14 @@ class Handler(_DashboardHandler):
             return self.platform.sessions.get(value,0)>time.time()
         except Exception:return False
     def _local_request(self):
+        path=urlparse(self.path).path
+        if path=='/health' and self.command in ('GET','HEAD'):return True
         host=self.headers.get('Host','');origin=self.headers.get('Origin')
         allowed={urlparse(self.platform.origin).netloc}
         if host not in allowed or (origin and origin.rstrip('/')!=self.platform.origin):
             self.send_error(403,'Same-origin requests only');return False
         path=urlparse(self.path).path
-        public=path in ('/auth/login','/health') or path.startswith('/platform-static/')
+        public=path in ('/auth/login','/auth/link','/health') or path.startswith('/platform-static/')
         if not public and not self._authenticated():
             if self.command in ('GET','HEAD') and not path.startswith(('/api/','/file/')):
                 self._html(LOGIN,head_only=self.command=='HEAD')
@@ -118,6 +135,8 @@ class Handler(_DashboardHandler):
         return True
     def do_HEAD(self):
         parsed=urlparse(self.path)
+        if parsed.path=='/health':
+            self.send_response(200);self.send_header('Content-Length','0');self.end_headers();return
         if parsed.path=='/':
             if self._local_request():self._html((STATIC/'index.html').read_text(),head_only=True)
             return
@@ -126,6 +145,12 @@ class Handler(_DashboardHandler):
         if not self._local_request():return
         parsed=urlparse(self.path)
         try:
+            if parsed.path=='/auth/link':
+                token=parse_qs(parsed.query).get('token',[''])[0]
+                with self.platform.auth_lock:
+                    if self.platform.accounts.load().get('_workspace_auth') or token in self.platform.used_invites or not valid_invite(token,os.getenv('NEXTPLAY_PASSWORD','')):
+                        self._json({'error':'This invitation expired. Sign in with your workspace password.'},401);return
+                    self.platform.used_invites.add(token);self._session(303,'/#settings');return
             if parsed.path=='/health':self._json({'ok':True,'app':'nextplay-social-studio'});return
             if parsed.path in ('/','/index.html'):
                 self._html((STATIC/'index.html').read_text());return
@@ -174,9 +199,8 @@ class Handler(_DashboardHandler):
             with self.platform.auth_lock:
                 failures=[t for t in self.platform.login_failures.get(ip,[]) if t>time.time()-300]
                 if len(failures)>=10:self._json({'error':'Try again later.'},429);return
-                if not os.getenv('NEXTPLAY_PASSWORD') or hmac.compare_digest(str(body.get('password','')).encode(),os.environ['NEXTPLAY_PASSWORD'].encode()):
-                    session=secrets.token_urlsafe(32);self.platform.sessions[session]=time.time()+43200
-                    self.send_response(200);self.send_header('Set-Cookie','nextplay_session='+session+'; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200'+('; Secure' if self.platform.origin.startswith('https') else ''));self.send_header('Content-Length','2');self.end_headers();self.wfile.write(b'{}');return
+                if not os.getenv('NEXTPLAY_PASSWORD') or matches(str(body.get('password','')),self.platform.accounts.load().get('_workspace_auth'),os.environ['NEXTPLAY_PASSWORD']):
+                    self._session();return
                 failures.append(time.time());self.platform.login_failures[ip]=failures
             self._json({'error':'Invalid password.'},401);return
         if parsed.path in ('/api/workspace/switch','/api/product/create'):
@@ -194,6 +218,17 @@ class Handler(_DashboardHandler):
                 if len(data)!=length:raise ValueError('Upload was interrupted.')
                 p=self.platform.upload(data,q.get('filename',['video.mp4'])[0],q.get('rights',['unknown'])[0]=='owned',q.get('id',[None])[0],int(q.get('version',['0'])[0]));self._json({'post':p});return
             body=self._body_json()
+            if action=='workspace-password':
+                with self.platform.auth_lock:
+                    saved=self.platform.accounts.load();record=saved.get('_workspace_auth')
+                    if record and not matches(str(body.get('current','')),record,''):raise ValueError('Enter your current password.')
+                    saved['_workspace_auth']=password_record(str(body.get('password','')));self.platform.accounts.save(saved);self.platform.sessions.clear();self._session();return
+            if action=='ai-config':
+                key=str(body.get('key',''))
+                if not key.startswith('sk-') or len(key)>512:raise ValueError('Invalid API key.')
+                with self.platform.auth_lock:
+                    saved=self.platform.accounts.load();saved['_openai']={'key':key};self.platform.accounts.save(saved);os.environ['OPENAI_API_KEY']=key
+                self._json({'configured':True});return
             if action=='create':self._json({'post':s.create(body.get('title',''),body.get('brief',''))});return
             if action=='settings':self._json({'brand':s.save_settings(body)});return
             if action=='provider-config':self._json(self.platform.bridge.configure(str(body.get('key','')),str(body.get('profile',''))));return
