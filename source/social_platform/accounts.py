@@ -1,5 +1,5 @@
 """Encrypted local OAuth credentials. Plaintext never enters API responses or logs."""
-import json,os,secrets,time
+import json,os,secrets,time,uuid
 from pathlib import Path
 from urllib.parse import urlencode
 from cryptography.fernet import Fernet
@@ -18,7 +18,7 @@ class Accounts:
     def load(self):
         return json.loads(self.cipher.decrypt(self.path.read_bytes())) if self.path.exists() else {}
     def save(self,data):
-        tmp=self.path.with_suffix('.tmp')
+        tmp=self.path.with_name(self.path.name+'.'+uuid.uuid4().hex+'.tmp')
         fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
         with os.fdopen(fd,'wb') as f:f.write(self.cipher.encrypt(json.dumps(data).encode()))
         os.replace(tmp,self.path)

@@ -91,6 +91,17 @@ class UploadPost:
         with path.open('rb') as f:r=self.request('POST','/api/upload',data=data,files={'video':(path.name,f,'video/mp4')},headers={'Idempotency-Key':data['request_id']},timeout=180)
         if r.get('request_id') and r['request_id']!=provider['request_id']:provider['request_id']=r['request_id']
         provider['phase']='processing';return provider
+    def analytics(self,c,provider):
+        data=self.request('GET','/api/uploadposts/post-analytics/'+quote(provider['request_id'],safe=''),params={'platform':c})
+        item=(data.get('platforms') or {}).get(c) or {}
+        metrics=item.get('post_metrics')
+        if not isinstance(metrics,dict) or not metrics:return []
+        normalized=[]
+        aliases={'view_count':'views','like_count':'likes','comment_count':'comments','share_count':'shares'}
+        for k,v in metrics.items():
+            if isinstance(v,(int,float)) and not isinstance(v,bool):normalized.append({'name':aliases.get(k,k),'values':[{'value':v}]})
+        return [{'id':str(item.get('platform_post_id') or provider.get('post_id') or provider['request_id']),'metrics':normalized}]
+
     def poll(self,c,provider):
         data=self.request('GET','/api/uploadposts/status',params={'request_id':provider['request_id']})
         if data.get('status')=='failed':return 'failed',provider

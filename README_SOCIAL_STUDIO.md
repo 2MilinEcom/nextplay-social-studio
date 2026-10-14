@@ -21,7 +21,7 @@ The application reuses `OPENAI_API_KEY` from its launching environment, or from 
 
 1. Set a brand name, audience, voice, CTA, and timezone in Settings.
 2. Upload one video, or create a draft and upload into it. Rights confirmation is optional for import but required for publishing approval.
-3. Open the preserved editor for multitrack editing, audio, captions, transitions, revisions, and export. Return to Social Studio and choose Render latest edit to attach a new render to the post. Existing editor revision history is retained.
+3. Open the preserved editor. Click **Done → Prepare posts** when its Saved indicator is ready. NextPlay renders the exact saved timeline in portrait, generates missing channel captions, preserves existing written captions, and returns you to post review. Preparation never approves or publishes a post. Existing editor revision history is retained.
 4. Write copy or generate/refine all three channel variants. AI sees the supplied brief, brand profile, and up to three sampled video frames; it does not hear the video or watch every frame.
 5. Review the preview, caption, hashtags, hook, CTA, and publishing preferences. Save and approve each desired channel.
 6. Schedule approved channels or choose Publish now. A running server processes due jobs. Missing connections produce a visible blocked job; they never count as published.
@@ -31,7 +31,15 @@ The application reuses `OPENAI_API_KEY` from its launching environment, or from 
 
 Music discovery performs a live web search using OpenAI and returns a dated report with source links. Trends, sound availability, commercial licenses, and the ability to attach native sounds are not guaranteed. Saved native sound suggestions can be selected on a post; they require an in-app finish and block automatic approval. Use licensed/owned audio in the original editor and render it for publishing from NextPlay. Source links support listening where the original source allows it; NextPlay does not host a searchable platform sound catalogue or native-audio preview library.
 
-## Account integrations
+## Login-based publishing service
+
+The recommended path for this personal workspace is the optional Upload-Post bridge. Sign in to Upload-Post, then use NextPlay Settings to securely link its API key and profile. NextPlay can create an empty profile during explicit setup if none exists. The Connect buttons then open Upload-Post's hosted social-account authorization page and return to NextPlay. No paid subscription is purchased by NextPlay.
+
+The bridge uploads the approved local MP4 directly, so it does not require a manually hosted Instagram video URL. It checks account identity, expired connections, and TikTok publishing preferences; persists request IDs before uploading; supplies an idempotency key; and polls completion. TikTok inbox fallback is shown as requiring attention, never as a confirmed public post. Credentials stay encrypted on the server. These adapter checks are automated mocks; real account authorization and live posting still require the service account.
+
+TikTok's current Direct Post guidelines reject upload tools limited to your own/team accounts. Consequently a custom personal-use developer app is not a promised route to public TikTok posting. An established publishing provider's connection is the intended route here, subject to its actual account eligibility and plan limits. See https://developers.tiktok.com/docs/en/content-sharing-guidelines and https://docs.upload-post.com/api/user-profiles/.
+
+## Advanced direct account integrations
 
 OAuth and publishing adapters are implemented for TikTok Direct Post, Instagram Reels with Instagram Login, and Facebook Page Reels. They have automated adapter tests but have not been authorized or verified against your real social accounts. Register developer applications, configure credentials and exact callback URLs, obtain the needed permissions/reviews, then connect accounts in Settings. Meta and TikTok can change requirements; confirm your app's API version and eligibility before activation.
 
@@ -71,3 +79,9 @@ node tests/test_timeline_shortcuts.js
 ```
 
 See `VERIFICATION.md` for the reproduced test results and limits. Live AI checks are separate and use synthetic content; no social posting occurred during tests.
+
+## Cloud deployment checkpoint — 14 October 2026
+
+Source is saved in the private repository https://github.com/2MilinEcom/nextplay-social-studio. The Docker deployment entrypoint provisions a writable persistent `/data` directory and runs the application as an unprivileged user. Railway configuration is included for one replica and health checks.
+
+Railway refused creation of the new project with: "Free plan resource provision limit exceeded. Please upgrade to provision more resources!" No new project or cloud deployment was created, no plan was upgraded, and existing DJ TUT/VibeProof projects were not changed. Account quota or plan access must be resolved before cloud publication. The code can be used locally meanwhile. The hosting issue is separate from Upload-Post social-account sign-in.

@@ -43,6 +43,12 @@ class ProviderTests(unittest.TestCase):
     def test_publication_confirmation(self):
         self.http.request.return_value=self.response({'status':'completed','results':[{'platform':'instagram','success':True,'post_id':'42'}]})
         status,p=self.bridge.poll('instagram',{'request_id':'qa'});self.assertEqual(status,'published');self.assertEqual(p['post_id'],'42')
+    def test_provider_metrics_without_invented_counts(self):
+        self.http.request.return_value=self.response({'success':True,'platforms':{'instagram':{'platform_post_id':'42','post_metrics':{'views':17,'likes':3}}}})
+        items=self.bridge.analytics('instagram',{'request_id':'qa'})
+        self.assertEqual(items[0]['id'],'42');self.assertEqual(len(items[0]['metrics']),2)
+        self.http.request.return_value=self.response({'success':True,'platforms':{'instagram':{'post_metrics':None}}})
+        self.assertEqual(self.bridge.analytics('instagram',{'request_id':'qa'}),[])
     def test_tiktok_inbox_is_not_published(self):
         self.http.request.return_value=self.response({'status':'completed','results':[{'platform':'tiktok','success':True,'fallback_to_inbox':True}]})
         self.assertEqual(self.bridge.poll('tiktok',{'request_id':'qa'})[0],'attention')

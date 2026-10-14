@@ -233,8 +233,11 @@ class Handler(_DashboardHandler):
                     if job['status']!='published':continue
                     p=job['payload'].get('provider',{});ids=p.get('post_ids') or [p.get('post_id') or p.get('video_id')]
                     ids=[i for i in ids if i]
-                    if not ids:continue
-                    for item in self.platform.publishers.analytics(job['channel'],ids):
+                    if p.get('service')=='upload-post':items=self.platform.bridge.analytics(job['channel'],p)
+                    else:
+                        if not ids:continue
+                        items=self.platform.publishers.analytics(job['channel'],ids)
+                    for item in items:
                         s.add_metric({'channel':job['channel'],'post_id':str(item['id']),'collected':now(),'data':item});count+=1
                 self._json({'collected':count});return
             p=s.get(body['id'])
