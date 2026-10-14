@@ -63,7 +63,7 @@ The interface and editor wrapper were checked at 390 × 844. This is a local app
 
 A Dockerfile and Compose configuration are supplied for deployment. The Python/FFmpeg backend cannot run in the Sites Cloudflare Worker runtime. It needs a container host, persistent volume at `/data`, HTTPS reverse proxy, and a registered public origin. Set `NEXTPLAY_ORIGIN` and `NEXTPLAY_PASSWORD` (16+ characters) before binding outside loopback. Network requests require the configured Host and Origin, with password sessions covering the original editor APIs as well as the new dashboard. Use a single process/replica with a durable volume; this release is a single-owner workspace, not a multiuser SaaS.
 
-The Docker build was not executed in this environment. No cloud resources, domains, app registrations, or social accounts were created. Email and advertising modules remain future work.
+The Docker build is awaiting Railway access to the private source repository. A separate NextPlay service, 500 MB volume, and HTTPS domain have been provisioned in DJ TUT. Social accounts are not yet connected. Email and advertising modules remain future work.
 
 ## Data and migration
 
@@ -84,4 +84,8 @@ See `VERIFICATION.md` for the reproduced test results and limits. Live AI checks
 
 Source is saved in the private repository https://github.com/2MilinEcom/nextplay-social-studio. The Docker deployment entrypoint provisions a writable persistent `/data` directory and runs the application as an unprivileged user. Railway configuration is included for one replica and health checks.
 
-Railway refused creation of the new project with: "Free plan resource provision limit exceeded. Please upgrade to provision more resources!" No new project or cloud deployment was created, no plan was upgraded, and existing DJ TUT/VibeProof projects were not changed. Account quota or plan access must be resolved before cloud publication. The code can be used locally meanwhile. The hosting issue is separate from Upload-Post social-account sign-in.
+A standalone new project was refused by Railway’s free-plan resource quota. With user authorization, a separate `nextplay-social-studio` service was successfully created inside DJ TUT, with a 500 MB `/data` volume and `nextplay-social-studio-production.up.railway.app` domain. Service-scoped origin, port, and private bootstrap authentication variables are set. Spotify remains on its original successful deployment; VibeProof was not modified. No paid plan was started.
+
+The first build is blocked because Railway’s GitHub installation currently has access to VibeProof only. GitHub sign-in and granting Railway access to `nextplay-social-studio` are pending. After that, connect the main branch and verify the first container build and live HTTPS checks. The cloud service is not live yet.
+
+Cloud owner setup supports a 15-minute first-login invitation, single use per running process and disabled permanently after password selection. The owner chooses a 16+ character password in Settings; only a salted scrypt hash is stored encrypted on the volume. `bootstrap_cloud.py` transfers the already-authorized OpenAI key through authenticated HTTPS into encrypted server storage without printing it, then saves a private first-login link under ignored `runtime/`. This step has not run against a live deployment yet.
