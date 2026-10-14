@@ -1,0 +1,11 @@
+.venv/
+runtime/
+*.log
+*.zip
+.env*
+!.env.platform.example
+source/.env.example
+**/__pycache__/
+*.pyc
+.deploy-secrets.json
+.DS_Store
