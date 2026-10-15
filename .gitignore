@@ -9,3 +9,10 @@ source/.env.example
 *.pyc
 .deploy-secrets.json
 .DS_Store
+
+# Local files
+**/xcuserdata/
+.env
+.env.local
+node_modules/
+.next/
